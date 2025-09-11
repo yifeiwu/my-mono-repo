@@ -1,8 +1,0 @@
-# .github/services.yml
-services:
-  payments:
-    - 'payments/**'
-  generations:
-    - 'generations/**'
-  common:
-    - 'common/**'  # common service invalidates everything
