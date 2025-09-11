@@ -18,10 +18,5 @@ jobs:
         with:
           helper: check-merge-safety
           github_token: ${{ secrets.MERGE_SAFETY_TOKEN }}  # Override with your PAT
-          # Optional: Define paths for monorepo modules (e.g., affected packages)
-          paths: '["payments", generations"]'  # Array of strings; adjust for your structure
-          override_filter_paths: '["common"]'
-          # Optional: Ignore specific paths (e.g., docs or unrelated files)
-          # ignore-paths: '["docs/", "*.md"]'  # Array of strings
-          # Optional: Custom base branch if not 'main'
-          # base-branch: 'develop'
+          paths: '["payments/", generations/"]'  # Array of strings; adjust for your structure
+          override_filter_paths: '["common/"]'
