@@ -1,10 +1,8 @@
+# .github/services.yml
 services:
-  common:
-    paths:
-      - "common/**"
   payments:
-    paths:
-      - "payments/**"
+    - 'payments/**'
   generations:
-    paths:
-      - "generations/**"
+    - 'generations/**'
+  common:
+    - 'common/**'  # common service invalidates everything
