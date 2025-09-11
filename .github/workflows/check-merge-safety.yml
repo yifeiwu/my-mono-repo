@@ -5,23 +5,33 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   service-check:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout PR
+      # 1️⃣ Checkout the PR commit explicitly
+      - name: Checkout PR commit
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
 
+      # 2️⃣ Fetch the latest main branch
       - name: Fetch main
-        run: git fetch origin main
+        run: |
+          git fetch origin main:main
 
+      # 3️⃣ Install yq for YAML parsing
       - name: Install yq
-        run: sudo apt-get install -y yq
+        run: sudo apt-get update && sudo apt-get install -y yq
 
+      # 4️⃣ Load services from config
       - name: Load services config
         id: load_config
         run: |
@@ -30,22 +40,22 @@ jobs:
             echo "Config file not found!"
             exit 1
           fi
-
-          # Read service names into array
           SERVICE_NAMES=($(yq e '.services | keys | .[]' $SERVICES_FILE))
           echo "services=${SERVICE_NAMES[*]}" >> $GITHUB_OUTPUT
 
+      # 5️⃣ Check service conflicts
       - name: Check service conflicts
         id: service_check
         env:
           GITHUB_TOKEN: ${{ secrets.MERGE_SAFETY_TOKEN }}
         run: |
           set -e
-          MERGE_BASE=$(git merge-base origin/main HEAD)
+
+          MERGE_BASE=$(git merge-base main HEAD)
           echo "Merge base: $MERGE_BASE"
 
           PR_FILES=$(git diff --name-only $MERGE_BASE HEAD)
-          MAIN_FILES=$(git diff --name-only $MERGE_BASE origin/main)
+          MAIN_FILES=$(git diff --name-only $MERGE_BASE main)
 
           echo "PR files:"
           echo "$PR_FILES"
@@ -56,17 +66,17 @@ jobs:
           BLOCK_SERVICES=()
 
           for SERVICE in ${{ steps.load_config.outputs.services }}; do
-            # Read all paths for this service
             PATHS=$(yq e ".services.$SERVICE.paths[]" .github/services.yml)
 
             PR_MATCH=""
             MAIN_MATCH=""
 
             for PATTERN in $PATHS; do
+              REGEX="^${PATTERN//\*\*/.*}$"
               PR_MATCH="$PR_MATCH
-$(echo "$PR_FILES" | grep -E "^${PATTERN//\*\*/.*}$" || true)"
+$(echo "$PR_FILES" | grep -E "$REGEX" || true)"
               MAIN_MATCH="$MAIN_MATCH
-$(echo "$MAIN_FILES" | grep -E "^${PATTERN//\*\*/.*}$" || true)"
+$(echo "$MAIN_FILES" | grep -E "$REGEX" || true)"
             done
 
             if [ "$SERVICE" = "common" ] && [ -n "$MAIN_MATCH" ]; then
@@ -84,7 +94,7 @@ $(echo "$MAIN_FILES" | grep -E "^${PATTERN//\*\*/.*}$" || true)"
             gh pr review ${{ github.event.pull_request.number }} \
               --repo ${{ github.repository }} \
               --request-changes \
-              --body "PR conflicts with main in the following service(s): ${BLOCK_SERVICES[*]}"
+              --body "PR conflicts with main in service(s): ${BLOCK_SERVICES[*]}"
           else
             echo "conflict=false" >> $GITHUB_OUTPUT
             gh pr review ${{ github.event.pull_request.number }} \
@@ -93,9 +103,9 @@ $(echo "$MAIN_FILES" | grep -E "^${PATTERN//\*\*/.*}$" || true)"
               --body "PR passes service-aware merge check."
           fi
 
-      - name: Fail if service conflicts
+      # 6️⃣ Fail if conflicts
+      - name: Fail if conflicts
         if: steps.service_check.outputs.conflict == 'true'
         run: |
-          echo "❌ PR conflicts detected in services. Please update branch."
+          echo "❌ PR conflicts detected in service(s). Please update branch."
           exit 1
-
