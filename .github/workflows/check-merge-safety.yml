@@ -1,24 +1,22 @@
-name: Check Merge Safety
+name: Merge Safety Check
 
 on:
-  push:
-    branches: [main]
   pull_request:
-    branches: [main]
-    paths:
-      - 'src/helpers/check-merge-safety.ts'
+    branches: [main]  # Replace with your base branch
 
 jobs:
-  test:
-    name: Merge Safety
+  check-merge-safety:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - uses: ./
+      - name: Check merge safety
+        id: safety-check  # This ID will be used for the status check name
+        uses: ExpediaGroup/github-helpers@v1  # Use the latest version; check the repo for updates
         with:
           helper: check-merge-safety
-          override_filter_paths: |
-            package.json
-            package-lock.json
+          # Optional: Define paths for monorepo modules (e.g., affected packages)
+          paths: '["payments", generations", "common"]'  # Array of strings; adjust for your structure
+          override_filter_paths: '["common"]'
+          # Optional: Ignore specific paths (e.g., docs or unrelated files)
+          # ignore-paths: '["docs/", "*.md"]'  # Array of strings
+          # Optional: Custom base branch if not 'main'
+          # base-branch: 'develop'
