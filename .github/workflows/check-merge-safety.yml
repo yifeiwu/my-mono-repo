@@ -10,6 +10,8 @@ jobs:
   check-merge-safety:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v5
       - name: Check merge safety
         id: safety-check  # This ID will be used for the status check name
         uses: ExpediaGroup/github-helpers@v1  # Use the latest version; check the repo for updates
