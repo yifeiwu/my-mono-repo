@@ -6,105 +6,98 @@ on:
   pull_request:
     branches: [main]
 
-permissions:
-  contents: write
-  pull-requests: write
-
 jobs:
   service-check:
     runs-on: ubuntu-latest
-
     steps:
-      # 1️⃣ Checkout the latest PR branch tip
-      - name: Checkout PR branch
+      - name: Checkout PR
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: refs/pull/${{ github.event.pull_request.number }}/head
 
-      # 2️⃣ Fetch latest main branch
-      - name: Fetch main
-        run: |
-          git fetch origin main:main
+      - name: Set up Git
+        run: git fetch origin main --unshallow
 
-      # 3️⃣ Install yq for parsing YAML
-      - name: Install yq
+      - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y yq
 
-      # 4️⃣ Load services config
-      - name: Load services config
-        id: load_config
+      - name: Determine changed files
+        id: changes
         run: |
-          SERVICES_FILE=".github/services.yml"
-          if [ ! -f "$SERVICES_FILE" ]; then
-            echo "Config file not found!"
-            exit 1
-          fi
-          SERVICE_NAMES=($(yq e '.services | keys | .[]' $SERVICES_FILE))
-          echo "services=${SERVICE_NAMES[*]}" >> $GITHUB_OUTPUT
+          MERGE_BASE=$(git merge-base HEAD origin/main)
+          PR_FILES=($(git diff --name-only origin/main...HEAD))
+          MAIN_CHANGED=($(git diff --name-only $MERGE_BASE origin/main))
+          
+          echo "PR_FILES=${PR_FILES[*]}" >> $GITHUB_OUTPUT
+          echo "MAIN_CHANGED=${MAIN_CHANGED[*]}" >> $GITHUB_OUTPUT
+          echo "Changed in PR: ${PR_FILES[*]}"
+          echo "Changed in main since branch point: ${MAIN_CHANGED[*]}"
 
-      # 5️⃣ Check service conflicts
-      - name: Check service conflicts
-        id: service_check
-        env:
-          GITHUB_TOKEN: ${{ secrets.MERGE_SAFETY_TOKEN }}
+      - name: Load services
+        id: services
         run: |
-          set -e
-          MERGE_BASE=$(git merge-base main HEAD)
-          echo "Merge base: $MERGE_BASE"
+          declare -A service_patterns
+          for service in $(yq e '.services | keys | .[]' .github/services.yml); do
+            patterns=$(yq e ".services.$service[]" .github/services.yml)
+            service_patterns[$service]="$patterns"
+          done
+          # Export associative array for later steps
+          declare -p service_patterns >> $GITHUB_ENV
 
-          PR_FILES=$(git diff --name-only $MERGE_BASE HEAD)
-          MAIN_FILES=$(git diff --name-only $MERGE_BASE main)
-
-          echo "PR files:"
-          echo "$PR_FILES"
-          echo "Main files:"
-          echo "$MAIN_FILES"
-
+      - name: Check affected services
+        id: check
+        run: |
+          # Load environment
+          eval "$(grep 'service_patterns' $GITHUB_ENV)"
+          
           BLOCK=false
-          BLOCK_SERVICES=()
+          PR_FILES=(${{ steps.changes.outputs.PR_FILES }})
+          MAIN_CHANGED=(${{ steps.changes.outputs.MAIN_CHANGED }})
+          MAIN_SET=()
+          declare -A MAIN_MAP
+          for f in "${MAIN_CHANGED[@]}"; do MAIN_MAP["$f"]=1; done
 
-          for SERVICE in ${{ steps.load_config.outputs.services }}; do
-            PATHS=$(yq e ".services.$SERVICE.paths[]" .github/services.yml)
-
-            PR_MATCH=""
-            MAIN_MATCH=""
-
-            for PATTERN in $PATHS; do
-              REGEX="^${PATTERN//\*\*/.*}$"
-              PR_MATCH="$PR_MATCH
-$(echo "$PR_FILES" | grep -E "$REGEX" || true)"
-              MAIN_MATCH="$MAIN_MATCH
-$(echo "$MAIN_FILES" | grep -E "$REGEX" || true)"
+          for service in "${!service_patterns[@]}"; do
+            IFS=$'\n' read -rd '' -a patterns <<< "${service_patterns[$service]}"
+            SERVICE_BLOCK=false
+            for f in "${PR_FILES[@]}"; do
+              for pattern in "${patterns[@]}"; do
+                if [[ $f == $pattern ]]; then
+                  if [[ ${MAIN_MAP[$f]} ]]; then
+                    echo "Service $service outdated: $f changed in main"
+                    BLOCK=true
+                  fi
+                  SERVICE_BLOCK=true
+                fi
+              done
             done
-
-            if [ "$SERVICE" = "common" ] && [ -n "$MAIN_MATCH" ]; then
+            if [[ "$service" == "common" ]] && [[ "$SERVICE_BLOCK" == true ]]; then
+              echo "Common service affected, marking block"
               BLOCK=true
-              BLOCK_SERVICES+=("$SERVICE")
-            elif [ -n "$PR_MATCH" ] && [ -n "$MAIN_MATCH" ]; then
-              BLOCK=true
-              BLOCK_SERVICES+=("$SERVICE")
             fi
           done
+          
+          echo "BLOCK=$BLOCK" >> $GITHUB_OUTPUT
+          echo "BLOCK=$BLOCK"
 
-          if [ "$BLOCK" = "true" ]; then
-            echo "conflict=true" >> $GITHUB_OUTPUT
-            echo "Blocking services: ${BLOCK_SERVICES[*]}"
-            gh pr review ${{ github.event.pull_request.number }} \
-              --repo ${{ github.repository }} \
-              --request-changes \
-              --body "PR conflicts with main in service(s): ${BLOCK_SERVICES[*]}"
-          else
-            echo "conflict=false" >> $GITHUB_OUTPUT
-            gh pr review ${{ github.event.pull_request.number }} \
-              --repo ${{ github.repository }} \
-              --approve \
-              --body "PR passes service-aware merge check."
-          fi
-
-      # 6️⃣ Fail if conflicts
-      - name: Fail if conflicts
-        if: steps.service_check.outputs.conflict == 'true'
-        run: |
-          echo "❌ PR conflicts detected in service(s). Please update branch."
-          exit 1
+      - name: Update GitHub PR status
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.MERGE_SAFETY_TOKEN }}
+          script: |
+            const context = github.context;
+            const sha = context.payload.pull_request.head.sha;
+            const blocked = '${{ steps.check.outputs.BLOCK }}' === 'true';
+            const state = blocked ? 'failure' : 'success';
+            const description = blocked
+              ? 'Out-of-date files detected'
+              : 'No conflicts with main. Safe to merge';
+            
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: sha,
+              state: state,
+              context: 'service-merge-check',
+              description: description
+            });
