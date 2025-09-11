@@ -1,0 +1,10 @@
+services:
+  common:
+    paths:
+      - "common/**"
+  payments:
+    paths:
+      - "payments/**"
+  generations:
+    paths:
+      - "generations/**"
