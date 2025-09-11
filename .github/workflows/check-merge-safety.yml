@@ -7,16 +7,95 @@ on:
     branches: [main]
 
 jobs:
-  check-merge-safety:
+  service-check:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-      - name: Check merge safety
-        id: safety-check  # This ID will be used for the status check name
-        uses: ExpediaGroup/github-helpers@v1  # Use the latest version; check the repo for updates
+      - name: Checkout PR
+        uses: actions/checkout@v4
         with:
-          helper: check-merge-safety
-          github_token: ${{ secrets.MERGE_SAFETY_TOKEN }}  # Override with your PAT
-          paths: payments/**, generations/**  
-          override_filter_globs: common/**
+          fetch-depth: 0
+
+      - name: Fetch main
+        run: git fetch origin main
+
+      - name: Install yq
+        run: sudo apt-get install -y yq
+
+      - name: Load services config
+        id: load_config
+        run: |
+          SERVICES_FILE=".github/services.yml"
+          if [ ! -f "$SERVICES_FILE" ]; then
+            echo "Config file not found!"
+            exit 1
+          fi
+
+          # Read service names into array
+          SERVICE_NAMES=($(yq e '.services | keys | .[]' $SERVICES_FILE))
+          echo "services=${SERVICE_NAMES[*]}" >> $GITHUB_OUTPUT
+
+      - name: Check service conflicts
+        id: service_check
+        env:
+          GITHUB_TOKEN: ${{ secrets.MERGE_SAFETY_TOKEN }}
+        run: |
+          set -e
+          MERGE_BASE=$(git merge-base origin/main HEAD)
+          echo "Merge base: $MERGE_BASE"
+
+          PR_FILES=$(git diff --name-only $MERGE_BASE HEAD)
+          MAIN_FILES=$(git diff --name-only $MERGE_BASE origin/main)
+
+          echo "PR files:"
+          echo "$PR_FILES"
+          echo "Main files:"
+          echo "$MAIN_FILES"
+
+          BLOCK=false
+          BLOCK_SERVICES=()
+
+          for SERVICE in ${{ steps.load_config.outputs.services }}; do
+            # Read all paths for this service
+            PATHS=$(yq e ".services.$SERVICE.paths[]" .github/services.yml)
+
+            PR_MATCH=""
+            MAIN_MATCH=""
+
+            for PATTERN in $PATHS; do
+              PR_MATCH="$PR_MATCH
+$(echo "$PR_FILES" | grep -E "^${PATTERN//\*\*/.*}$" || true)"
+              MAIN_MATCH="$MAIN_MATCH
+$(echo "$MAIN_FILES" | grep -E "^${PATTERN//\*\*/.*}$" || true)"
+            done
+
+            if [ "$SERVICE" = "common" ] && [ -n "$MAIN_MATCH" ]; then
+              BLOCK=true
+              BLOCK_SERVICES+=("$SERVICE")
+            elif [ -n "$PR_MATCH" ] && [ -n "$MAIN_MATCH" ]; then
+              BLOCK=true
+              BLOCK_SERVICES+=("$SERVICE")
+            fi
+          done
+
+          if [ "$BLOCK" = "true" ]; then
+            echo "conflict=true" >> $GITHUB_OUTPUT
+            echo "Blocking services: ${BLOCK_SERVICES[*]}"
+            gh pr review ${{ github.event.pull_request.number }} \
+              --repo ${{ github.repository }} \
+              --request-changes \
+              --body "PR conflicts with main in the following service(s): ${BLOCK_SERVICES[*]}"
+          else
+            echo "conflict=false" >> $GITHUB_OUTPUT
+            gh pr review ${{ github.event.pull_request.number }} \
+              --repo ${{ github.repository }} \
+              --approve \
+              --body "PR passes service-aware merge check."
+          fi
+
+      - name: Fail if service conflicts
+        if: steps.service_check.outputs.conflict == 'true'
+        run: |
+          echo "❌ PR conflicts detected in services. Please update branch."
+          exit 1
+
