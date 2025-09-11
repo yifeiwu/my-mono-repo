@@ -1,8 +1,10 @@
 name: Merge Safety Check
 
 on:
+  push:
+    branches: [main]
   pull_request:
-    branches: [main]  # Replace with your base branch
+    branches: [main]
 
 jobs:
   check-merge-safety:
