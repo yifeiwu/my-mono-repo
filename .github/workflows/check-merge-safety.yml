@@ -5,7 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-    
+
 permissions:
   contents: write
   pull-requests: write
@@ -15,23 +15,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout the PR commit explicitly
-      - name: Checkout PR commit
+      # 1️⃣ Checkout the latest PR branch tip
+      - name: Checkout PR branch
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: refs/pull/${{ github.event.pull_request.number }}/head
 
-      # 2️⃣ Fetch the latest main branch
+      # 2️⃣ Fetch latest main branch
       - name: Fetch main
         run: |
           git fetch origin main:main
 
-      # 3️⃣ Install yq for YAML parsing
+      # 3️⃣ Install yq for parsing YAML
       - name: Install yq
         run: sudo apt-get update && sudo apt-get install -y yq
 
-      # 4️⃣ Load services from config
+      # 4️⃣ Load services config
       - name: Load services config
         id: load_config
         run: |
@@ -50,7 +50,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.MERGE_SAFETY_TOKEN }}
         run: |
           set -e
-
           MERGE_BASE=$(git merge-base main HEAD)
           echo "Merge base: $MERGE_BASE"
 
