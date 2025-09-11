@@ -7,102 +7,16 @@ on:
     branches: [main]
 
 jobs:
-  service-check:
+  check-merge-safety:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout PR
-        uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Check merge safety
+        id: safety-check  # This ID will be used for the status check name
+        uses: ExpediaGroup/github-helpers@v1  # Use the latest version; check the repo for updates
         with:
-          fetch-depth: 0
-
-      - name: Ensure main is up to date
-        run: git fetch origin main
-
-      - name: Determine changed files
-        id: changes
-        run: |
-          MERGE_BASE=$(git merge-base HEAD origin/main)
-          PR_FILES=($(git diff --name-only origin/main...HEAD))
-          MAIN_CHANGED=($(git diff --name-only $MERGE_BASE origin/main))
-          
-          echo "PR_FILES=${PR_FILES[*]}" >> $GITHUB_OUTPUT
-          echo "MAIN_CHANGED=${MAIN_CHANGED[*]}" >> $GITHUB_OUTPUT
-          echo "Changed in PR: ${PR_FILES[*]}"
-          echo "Changed in main since branch point: ${MAIN_CHANGED[*]}"
-
-      - name: Parse services.yml
-        id: services
-        run: |
-          declare -A service_patterns
-          current_service=""
-          while read -r line; do
-            # Skip empty lines
-            [[ -z "$line" ]] && continue
-            # Detect service name
-            if [[ "$line" =~ ^([a-zA-Z0-9_-]+):$ ]]; then
-              current_service="${BASH_REMATCH[1]}"
-              service_patterns[$current_service]=""
-            elif [[ "$line" =~ ^[[:space:]]*-\ (.+)$ ]]; then
-              pattern="${BASH_REMATCH[1]}"
-              service_patterns[$current_service]+="$pattern "
-            fi
-          done < .github/services.yml
-          
-          # Export associative array
-          declare -p service_patterns >> $GITHUB_ENV
-
-      - name: Check affected services
-        id: check
-        run: |
-          eval "$(grep 'service_patterns' $GITHUB_ENV)"
-          
-          BLOCK=false
-          PR_FILES=(${{ steps.changes.outputs.PR_FILES }})
-          MAIN_CHANGED=(${{ steps.changes.outputs.MAIN_CHANGED }})
-          declare -A MAIN_MAP
-          for f in "${MAIN_CHANGED[@]}"; do MAIN_MAP["$f"]=1; done
-
-          for service in "${!service_patterns[@]}"; do
-            patterns=(${service_patterns[$service]})
-            SERVICE_BLOCK=false
-            for f in "${PR_FILES[@]}"; do
-              for pattern in "${patterns[@]}"; do
-                if [[ $f == $pattern ]]; then
-                  if [[ ${MAIN_MAP[$f]} ]]; then
-                    echo "Service $service outdated: $f changed in main"
-                    BLOCK=true
-                  fi
-                  SERVICE_BLOCK=true
-                fi
-              done
-            done
-            if [[ "$service" == "common" ]] && [[ "$SERVICE_BLOCK" == true ]]; then
-              echo "Common service affected, marking block"
-              BLOCK=true
-            fi
-          done
-          
-          echo "BLOCK=$BLOCK" >> $GITHUB_OUTPUT
-          echo "BLOCK=$BLOCK"
-
-      - name: Update GitHub PR status
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.MERGE_SAFETY_TOKEN }}
-          script: |
-            const context = github.context;
-            const sha = context.payload.pull_request.head.sha;
-            const blocked = '${{ steps.check.outputs.BLOCK }}' === 'true';
-            const state = blocked ? 'failure' : 'success';
-            const description = blocked
-              ? 'Out-of-date files detected'
-              : 'No conflicts with main. Safe to merge';
-            
-            await github.rest.repos.createCommitStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              sha: sha,
-              state: state,
-              context: 'service-merge-check',
-              description: description
-            });
+          helper: check-merge-safety
+          github_token: ${{ secrets.MERGE_SAFETY_TOKEN }}  # Override with your PAT
+          paths: '["payments/**", generations/**"]'  # Array of strings; adjust for your structure
+          override_filter_paths: '["common/**"]'
