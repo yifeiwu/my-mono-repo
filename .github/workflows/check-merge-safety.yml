@@ -13,6 +13,7 @@ jobs:
         uses: ExpediaGroup/github-helpers@v1  # Use the latest version; check the repo for updates
         with:
           helper: check-merge-safety
+          github_token: ${{ secrets.MERGE_SAFETY_TOKEN }}  # Override with your PAT
           # Optional: Define paths for monorepo modules (e.g., affected packages)
           paths: '["payments", generations", "common"]'  # Array of strings; adjust for your structure
           override_filter_paths: '["common"]'
