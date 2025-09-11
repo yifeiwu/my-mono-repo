@@ -16,7 +16,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Git
-        run: git fetch origin main --unshallow
+        run: git fetch origin main
 
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y yq
