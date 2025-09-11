@@ -15,11 +15,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Git
+      - name: Ensure main is up to date
         run: git fetch origin main
-
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y yq
 
       - name: Determine changed files
         id: changes
@@ -33,32 +30,40 @@ jobs:
           echo "Changed in PR: ${PR_FILES[*]}"
           echo "Changed in main since branch point: ${MAIN_CHANGED[*]}"
 
-      - name: Load services
+      - name: Parse services.yml
         id: services
         run: |
           declare -A service_patterns
-          for service in $(yq e '.services | keys | .[]' .github/services.yml); do
-            patterns=$(yq e ".services.$service[]" .github/services.yml)
-            service_patterns[$service]="$patterns"
-          done
-          # Export associative array for later steps
+          current_service=""
+          while read -r line; do
+            # Skip empty lines
+            [[ -z "$line" ]] && continue
+            # Detect service name
+            if [[ "$line" =~ ^([a-zA-Z0-9_-]+):$ ]]; then
+              current_service="${BASH_REMATCH[1]}"
+              service_patterns[$current_service]=""
+            elif [[ "$line" =~ ^[[:space:]]*-\ (.+)$ ]]; then
+              pattern="${BASH_REMATCH[1]}"
+              service_patterns[$current_service]+="$pattern "
+            fi
+          done < .github/services.yml
+          
+          # Export associative array
           declare -p service_patterns >> $GITHUB_ENV
 
       - name: Check affected services
         id: check
         run: |
-          # Load environment
           eval "$(grep 'service_patterns' $GITHUB_ENV)"
           
           BLOCK=false
           PR_FILES=(${{ steps.changes.outputs.PR_FILES }})
           MAIN_CHANGED=(${{ steps.changes.outputs.MAIN_CHANGED }})
-          MAIN_SET=()
           declare -A MAIN_MAP
           for f in "${MAIN_CHANGED[@]}"; do MAIN_MAP["$f"]=1; done
 
           for service in "${!service_patterns[@]}"; do
-            IFS=$'\n' read -rd '' -a patterns <<< "${service_patterns[$service]}"
+            patterns=(${service_patterns[$service]})
             SERVICE_BLOCK=false
             for f in "${PR_FILES[@]}"; do
               for pattern in "${patterns[@]}"; do
