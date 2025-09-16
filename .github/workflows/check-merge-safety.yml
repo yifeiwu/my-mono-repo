@@ -26,12 +26,13 @@ jobs:
           github_token: ${{ secrets.MERGE_SAFETY_TOKEN }}
 
           paths: |
-            common/
             payments/
             generations/
           # Global files that should trigger merge safety checks for all projects
           override_filter_paths: |
             package.json
+          override_filter_globs: |
+            common/**
           # Alternative: use glob patterns for global files
           # override_filter_globs: |
           #   *.json
