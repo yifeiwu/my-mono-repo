@@ -5,6 +5,10 @@ on:
     types: [opened, synchronize, reopened]
   push:
     branches: [main]
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
 
 jobs:
   check-merge-safety:
@@ -22,10 +26,7 @@ jobs:
         with:
           helper: check-merge-safety
           github_token: ${{ secrets.MERGE_SAFETY_TOKEN }}
-          # Define the 3 directories:
-          # - shared-lib/ (parent dependency used by both services)
-          # - service-a/ (independent service that depends on shared-lib)
-          # - service-b/ (independent service that depends on shared-lib)
+
           paths: |
             common/
             payments/
@@ -43,5 +44,4 @@ jobs:
           ignore_globs: |
             **/docs/**
             **/.gitignore
-          # Custom context name for the status check
-          context: "Merge Safety Check"
+
