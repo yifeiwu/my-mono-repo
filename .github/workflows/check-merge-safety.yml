@@ -1,10 +1,8 @@
 name: Merge Safety Check
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-  push:
-    branches: [main]
+  workflow_call:
+  
 permissions:
   contents: read
   pull-requests: read
