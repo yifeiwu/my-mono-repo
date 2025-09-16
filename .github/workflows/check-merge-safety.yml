@@ -1,4 +1,4 @@
-name: Merge Safety Check
+name: Merge Safety CheckV4
 
 on:
   pull_request:
@@ -14,7 +14,7 @@ permissions:
 jobs:
   check-merge-safety-v4:
     runs-on: ubuntu-latest
-    name: Check Merge Safety
+    name: Check Merge SafetyV4
     steps:
       - name: Checkout
         uses: actions/checkout@v4
