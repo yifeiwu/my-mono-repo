@@ -1,22 +1,47 @@
 name: Merge Safety Check
 
 on:
-  push:
-    branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened]
+  push:
     branches: [main]
 
 jobs:
   check-merge-safety:
     runs-on: ubuntu-latest
+    name: Check Merge Safety
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
-      - name: Check merge safety
-        id: safety-check  # This ID will be used for the status check name
-        uses: ExpediaGroup/github-helpers@v1  # Use the latest version; check the repo for updates
+        uses: actions/checkout@v4
+        with:
+          # Fetch full history for accurate diff comparison
+          fetch-depth: 0
+
+      - name: Check Merge Safety
+        uses: ExpediaGroup/github-helpers@main
         with:
           helper: check-merge-safety
-          github_token: ${{ secrets.MERGE_SAFETY_TOKEN }}  # Override with your PAT
-          paths: '["payments/**", generations/**"]'  # Array of strings; adjust for your structure
-          override_filter_paths: '["common/**"]'
+          github_token: ${{ secrets.MERGE_SAFETY_TOKEN }}
+          # Define the 3 directories:
+          # - shared-lib/ (parent dependency used by both services)
+          # - service-a/ (independent service that depends on shared-lib)
+          # - service-b/ (independent service that depends on shared-lib)
+          paths: |
+            common/
+            payments/
+            generations/
+          # Global files that should trigger merge safety checks for all projects
+          override_filter_paths: |
+            package.json
+          # Alternative: use glob patterns for global files
+          # override_filter_globs: |
+          #   *.json
+          #   *.lock
+          #   .github/**
+          #   **/Dockerfile
+          # Files to ignore in merge safety checks
+          ignore_globs: |
+            **/docs/**
+            **/.gitignore
+          # Custom context name for the status check
+          context: "Merge Safety Check"
